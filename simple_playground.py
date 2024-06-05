@@ -10,20 +10,26 @@ import matplotlib.patches
 from PyQt5 import QtWidgets, QtCore
 matplotlib.use('Qt5Agg')
 
-# 隱藏層的activation function
+# 隱藏層的激活函數
 def relu(x):
     return np.maximum(0, x)
 
-# 類神經網路計算
+# 多層感知機MLP
 def MLP(car_state, Whid, Wout):
+    '''
+    Whid (numpy array): 輸入層到隱藏層的權重矩陣。
+    Wout (numpy array): 隱藏層到輸出層的權重矩陣。
+    '''
     front_dist, right_dist, left_dist = car_state
-    inp = np.array([[front_dist, right_dist, left_dist]])
+    # 將車輛狀態數據轉換為NumPy數組，作為神經網路的輸入層
+    input_layer = np.array([[front_dist, right_dist, left_dist]])
+    # 計算隱藏層的輸入與輸出
+    hidden_input = input_layer @ Whid
+    hidden_output = relu(hidden_input)
 
-    SUMhid = inp @ Whid
-    Ahid = relu(SUMhid)
-
-    SUMout = Ahid @ Wout
-    # tanh 是輸出層的activation function
+    # 計算輸出層的輸入
+    SUMout = hidden_output @ Wout
+    # 使用tanh因為可以幫我轉換為-1~1之間的值
     wheel_angle = 40 * np.tanh(SUMout * 1/5)
 
     return wheel_angle[0, 0]
@@ -123,7 +129,7 @@ class Playground:
         self.car = Car()
         self.reset()
 
-    def is_successful(self):
+    def succeeded(self):
         return self.complete  # 返回模擬是否成功 
      
     def _setDefaultLine(self):
@@ -292,12 +298,6 @@ class Playground:
             self.car.setAngle(angle)
         self._checkDoneIntersects()
 
-    # def calWheelAngleFromAction(self, action):
-    #     angle = self.car.wheel_min + \
-    #             action * (self.car.wheel_max - self.car.wheel_min) / \
-    #             (self.n_actions - 1)
-    #     return angle
-
     def step(self, action=None):
         if action:
             # angle = self.calWheelAngleFromAction(action=action)
@@ -317,54 +317,52 @@ class Playground:
 
         self.step(wheel_angle)
 
-# 每個粒子
-# (為了避免宣告過於大量的playground使得記憶體不足或是速度過慢，
-# 這裡將自走車以外的權重、速度等獨立出來)
+# 粒子
 class Particle:
-    def __init__(self, neuronNumber_hid=50):
+    def __init__(self, neuronNumber_hid=100):
         self.neuronNumber_hid = neuronNumber_hid
         self.Whid = np.random.uniform(-10.0, 10.0, size=(3, self.neuronNumber_hid))
         self.Wout = np.random.uniform(-10.0, 10.0, size=(self.neuronNumber_hid, 1))
-        self.pre_v = 0
-        self.cur_v = 0
-        self.rout_history = []
-        self.is_successful = False
+        self.pre_velocity = 0 #前一時間速度
+        self.cur_velocity = 0 #當前速度
+        self.route_history = [] #紀錄車輛行駛路徑
+        self.succeeded = False #紀錄是否抵達終點
 
     # 更新權重
-    def update_weight(self, previous_best, neighbor_best, pre_phi=0.5, nei_phi=0.5):
-        self.pre_v = self.cur_v
-
+    def update_weight(self, previous_best, global_best, pre_phi=0.5, nei_phi=0.5):
+        self.pre_velocity = self.cur_velocity
+        #結合當前權重
         combined = np.vstack((self.Whid, self.Wout.reshape(1, -1)))
-
-        self.cur_v = self.pre_v + pre_phi * (previous_best - combined) + nei_phi * (neighbor_best - combined)
-
-        self.Whid = self.Whid + self.cur_v[:-1]
-        self.Wout = self.Wout + self.cur_v[-1].reshape(-1, 1)
+        # 計算新的速度，包含自我認知分量和社會認知分量
+        self.cur_velocity = self.pre_velocity + pre_phi * (previous_best - combined) + nei_phi * (global_best - combined)
+        #更新權重
+        self.Whid = self.Whid + self.cur_velocity[:-1]
+        self.Wout = self.Wout + self.cur_velocity[-1].reshape(-1, 1)
 
     # 執行car在playground上的計算
     def run_carInPlayground(self, playground: Playground):
         playground.reset()
-        self.rout_history.clear()
-        self.rout_history.append([playground.car.xpos, playground.car.ypos])
+        self.route_history.clear()
+        self.route_history.append([playground.car.xpos, playground.car.ypos])
         while not playground.done:
             wheel_angle = MLP(playground.state, self.Whid, self.Wout)
             playground.step(wheel_angle)
-            self.rout_history.append([playground.car.xpos, playground.car.ypos])
-        self.is_successful = playground.complete
+            self.route_history.append([playground.car.xpos, playground.car.ypos])
+        self.succeeded = playground.complete
 
     # 回傳車子的路徑紀錄
     def get_route(self):
-        return self.rout_history
+        return self.route_history
 
     # 回傳這個權重是否可以到達終點
-    def is_success(self):
-        return self.is_successful
+    def can_finish(self):
+        return self.succeeded
 
     # 回傳車子的神經元權重
     def get_weight(self):
         return np.vstack((self.Whid, self.Wout.reshape(1, -1)))
 
-# PSO計算
+# PSO
 class PSO:
     def __init__(self, init_particleNumber=40):
         self.previous_best_particle_weight = None
@@ -375,17 +373,17 @@ class PSO:
         self.particles = [Particle() for i in range(init_particleNumber)]
 
     # 適應度函數
-    def fittness_func(self, car_track: list, is_successful: bool):
+    def fittness_func(self, car_track: list, succeeded: bool):
         """
         :param car_track: 表示每個粒子的過往軌跡
-        :param is_successful: 表示一個粒子是否成功走到終點
+        :param succeeded: 表示一個粒子是否成功走到終點
         :return: 回傳計算的是適應度值
 
         score = success score + car last y coordinate - 0.5 * (car total path length)
         """
-        self.find_successParticle = True if is_successful else self.find_successParticle
+        self.find_successParticle = True if succeeded else self.find_successParticle
 
-        score = ((200 if is_successful else 0) +  # 成功的路徑出現
+        score = ((200 if succeeded else 0) +  # 成功的路徑出現
                  0.8 * car_track[-1][0] +   # 最終的x值最大
                  car_track[-1][1] -         # 最終的y值最大
                  0.5 * len(car_track))      # 移動路線最短(但考慮到最一開始就失敗的範例，所以將權重減少)
@@ -401,28 +399,26 @@ class PSO:
             # 計算歷史最佳和鄰近最佳
             for ind_out, particle in enumerate(self.particles):
                 # 更新歷史最佳
-                if (self.fittness_func(particle.get_route(), particle.is_success()) >
+                if (self.fittness_func(particle.get_route(), particle.can_finish()) >
                         self.previous_best_particle_fitnessVal):
                     self.previous_best_particle_fitnessVal = self.fittness_func(particle.get_route(),
-                                                                                particle.is_success())
+                                                                                particle.can_finish())
                     self.previous_best_particle_weight = particle.get_weight()
-                    if (particle.is_success()):
+                    if (particle.can_finish()):
                         self.find_successParticle = True
 
                 # 更新鄰居最佳
-                neighbor_best_particle_weight = particle.get_weight()
-                neighbor_best_particle_fitnessVal = self.fittness_func(particle.get_route(), particle.is_success())
+                global_best_particle_weight = particle.get_weight()
+                global_best_particle_fitnessVal = self.fittness_func(particle.get_route(), particle.can_finish())
                 for ind_in, neighbor in enumerate(self.particles):
                     # 若找到鄰近最佳
-                    if (self.fittness_func(neighbor.get_route(), neighbor.is_success()) >
-                            neighbor_best_particle_fitnessVal):
-                        neighbor_best_particle_weight = neighbor.get_weight()
-                        neighbor_best_particle_fitnessVal = self.fittness_func(neighbor.get_route(),
-                                                                               neighbor.is_success())
+                    if (self.fittness_func(neighbor.get_route(), neighbor.can_finish()) >
+                            global_best_particle_fitnessVal):
+                        global_best_particle_weight = neighbor.get_weight()
+                        global_best_particle_fitnessVal = self.fittness_func(neighbor.get_route(),
+                                                                               neighbor.can_finish())
                 # 更新粒子的速度和位置
-                particle.update_weight(self.previous_best_particle_weight, neighbor_best_particle_weight)
-
-                # print(self.find_successParticle)
+                particle.update_weight(self.previous_best_particle_weight, global_best_particle_weight)
 
     # 取得最佳的粒子
     def get_weight(self):
