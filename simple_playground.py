@@ -29,8 +29,9 @@ def MLP(car_state, Whid, Wout):
 
     # 計算輸出層的輸入
     SUMout = hidden_output @ Wout
+
     # 使用tanh因為可以幫我轉換為-1~1之間的值
-    wheel_angle = 40 * np.tanh(SUMout * 1/8)
+    wheel_angle = 40 * np.tanh(SUMout * 1/5)
 
     return wheel_angle[0, 0]
 
@@ -329,18 +330,18 @@ class Particle:
         self.succeeded = False #紀錄是否抵達終點
 
     # 更新權重
-    def update_weight(self, previous_best, global_best, pre_phi=2.0, nei_phi=2.0):
+    def update_weight(self, previous_best, global_best, phi1=2.0, phi2=2.0):
         self.pre_velocity = self.cur_velocity
-        #結合當前權重
+        #把權重堆疊成一個數組
         combined = np.vstack((self.Whid, self.Wout.reshape(1, -1)))
         # 計算新的速度，包含自我認知分量和社會認知分量
-        self.cur_velocity = self.pre_velocity + pre_phi * (previous_best - combined) + nei_phi * (global_best - combined)
+        self.cur_velocity = self.pre_velocity + phi1 * (previous_best - combined) + phi2 * (global_best - combined)
         #更新權重
         self.Whid = self.Whid + self.cur_velocity[:-1]
         self.Wout = self.Wout + self.cur_velocity[-1].reshape(-1, 1)
 
     # 執行car在playground上的計算
-    def run_carInPlayground(self, playground: Playground):
+    def runInPlayground(self, playground: Playground):
         playground.reset()
         self.route_history.clear()
         self.route_history.append([playground.car.xpos, playground.car.ypos])
@@ -373,33 +374,27 @@ class PSO:
         self.particles = [Particle() for i in range(init_particleNumber)]
 
     # 適應度函數
-    def fittness_func(self, car_track: list, succeeded: bool):
-        """
-        :param car_track: 粒子的過往軌跡
-        :param succeeded: 任一個粒子是否成功走到終點
-        :return: 回傳計算的是適應度值
-        """
+    def fittness_func(self, car_traj: list, succeeded: bool):
         if succeeded:
             self.find_successParticle = True  
 
-        score = ((200 if succeeded else 0) +  # 成功的路徑出現
-                 0.8 * car_track[-1][0] +   # 最終的x值最大
-                 1 * car_track[-1][1] -   # 最終的y值最大
-                 0.4 * len(car_track))      # 移動路線最短
+        func = ( 0.8 * car_traj[-1][0] +   # 最終的x值
+                 1 * car_traj[-1][1] -     # 最終的y值
+                 0.4 * len(car_traj) +     # 移動路線長度
+                (200 if succeeded else 0))     # 成功的路徑出現 
 
-        return score
+        return func
 
     def train_model(self):
         while not self.find_successParticle:
             # 先求得每台車子的運行結果
             for particle in self.particles:
-                particle.run_carInPlayground(self.playground)
+                particle.runInPlayground(self.playground)
 
             # 計算歷史最佳和鄰近最佳
             for ind_out, particle in enumerate(self.particles):
                 # 更新歷史最佳
-                if (self.fittness_func(particle.get_route(), particle.can_finish()) >
-                        self.previous_best_particle_fitnessVal):
+                if (self.fittness_func(particle.get_route(), particle.can_finish()) >self.previous_best_particle_fitnessVal):
                     self.previous_best_particle_fitnessVal = self.fittness_func(particle.get_route(),
                                                                                 particle.can_finish())
                     self.previous_best_particle_weight = particle.get_weight()
@@ -476,7 +471,6 @@ class Animation(QtWidgets.QMainWindow):
         start_line: 起點
         finish_line: 終點
         car_path: 明確路徑
-        ax: 畫布
         direction_line: 顯示車子所面向的方向
         text: 感測器偵測到的距離    
         '''
@@ -532,9 +526,9 @@ class Animation(QtWidgets.QMainWindow):
         self.update_path()
         self.draw_car(car_pos)
         self.text.set_text(
-            f'front censor: {self.play.state[0]:.{3}f}\n'
-            f'right censor: {self.play.state[1]:.{3}f}\n'
-            f'left censor: {self.play.state[2]:.{3}f}'
+            f'front sensor: {self.play.state[0]:.{3}f}\n'
+            f'right sensor: {self.play.state[1]:.{3}f}\n'
+            f'left sensor: {self.play.state[2]:.{3}f}'
         )
 
         # 抵達終點的話就算成功
