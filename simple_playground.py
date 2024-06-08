@@ -30,7 +30,7 @@ def MLP(car_state, Whid, Wout):
     # 計算輸出層的輸入
     SUMout = hidden_output @ Wout
     # 使用tanh因為可以幫我轉換為-1~1之間的值
-    wheel_angle = 40 * np.tanh(SUMout * 1/5)
+    wheel_angle = 40 * np.tanh(SUMout * 1/8)
 
     return wheel_angle[0, 0]
 
@@ -175,7 +175,7 @@ class Playground:
             self._setDefaultLine()
 
     @property
-    def n_actions(self):  # action = [0~num_angles-1]
+    def n_actions(self):  
         return (self.car.wheel_max - self.car.wheel_min + 1)
 
     @property
@@ -321,15 +321,15 @@ class Playground:
 class Particle:
     def __init__(self, neuronNumber_hid=100):
         self.neuronNumber_hid = neuronNumber_hid
-        self.Whid = np.random.uniform(-10.0, 10.0, size=(3, self.neuronNumber_hid))
-        self.Wout = np.random.uniform(-10.0, 10.0, size=(self.neuronNumber_hid, 1))
+        self.Whid = np.random.uniform(-8.0, 8.0, size=(3, self.neuronNumber_hid))
+        self.Wout = np.random.uniform(-8.0, 8.0, size=(self.neuronNumber_hid, 1))
         self.pre_velocity = 0 #前一時間速度
         self.cur_velocity = 0 #當前速度
         self.route_history = [] #紀錄車輛行駛路徑
         self.succeeded = False #紀錄是否抵達終點
 
     # 更新權重
-    def update_weight(self, previous_best, global_best, pre_phi=0.5, nei_phi=0.5):
+    def update_weight(self, previous_best, global_best, pre_phi=2.0, nei_phi=2.0):
         self.pre_velocity = self.cur_velocity
         #結合當前權重
         combined = np.vstack((self.Whid, self.Wout.reshape(1, -1)))
@@ -364,7 +364,7 @@ class Particle:
 
 # PSO
 class PSO:
-    def __init__(self, init_particleNumber=40):
+    def __init__(self, init_particleNumber=50):
         self.previous_best_particle_weight = None
         self.previous_best_particle_fitnessVal = float("-inf")
         self.find_successParticle = False
@@ -375,18 +375,17 @@ class PSO:
     # 適應度函數
     def fittness_func(self, car_track: list, succeeded: bool):
         """
-        :param car_track: 表示每個粒子的過往軌跡
-        :param succeeded: 表示一個粒子是否成功走到終點
+        :param car_track: 粒子的過往軌跡
+        :param succeeded: 任一個粒子是否成功走到終點
         :return: 回傳計算的是適應度值
-
-        score = success score + car last y coordinate - 0.5 * (car total path length)
         """
-        self.find_successParticle = True if succeeded else self.find_successParticle
+        if succeeded:
+            self.find_successParticle = True  
 
         score = ((200 if succeeded else 0) +  # 成功的路徑出現
                  0.8 * car_track[-1][0] +   # 最終的x值最大
-                 car_track[-1][1] -         # 最終的y值最大
-                 0.5 * len(car_track))      # 移動路線最短(但考慮到最一開始就失敗的範例，所以將權重減少)
+                 1 * car_track[-1][1] -   # 最終的y值最大
+                 0.4 * len(car_track))      # 移動路線最短
 
         return score
 
@@ -538,7 +537,6 @@ class Animation(QtWidgets.QMainWindow):
             f'left censor: {self.play.state[2]:.{3}f}'
         )
 
-        # 如果撞牆的話就算失敗
         # 抵達終點的話就算成功
         if self.play.done:
             if self.play.complete:
@@ -571,7 +569,7 @@ class Animation(QtWidgets.QMainWindow):
         front_sensor = self.play.car.getPosition("front")
         self.direction_line.set_data([car_pos.x, front_sensor.x], [car_pos.y, front_sensor.y])
 
-    # 再次開始的時候，清理之前的車子移動軌跡
+    # 清理之前的車子移動軌跡
     def clean(self):
         for trace in self.ax.patches:
             trace.remove()
