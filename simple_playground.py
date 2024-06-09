@@ -443,21 +443,30 @@ class Animation(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.path_points = []
 
-        # 訓練模型
         pso.train_model()
         self.weight = pso.get_weight()
         pso.clear_particles()
 
         # 建立主視窗
-        self.setWindowTitle("操作介面")
+        self.setWindowTitle("PSO訓練自走車")
         self.main_widget = QtWidgets.QWidget(self)
         self.setCentralWidget(self.main_widget)
 
+        button_style = ("QPushButton {"
+                        "  background-color: #8fc08f; color: black;"
+                        "  border-radius: 10px; padding: 15px 30px;"
+                        "  font-size: 16px;"
+                        "}"
+                        "QPushButton:hover {"
+                        "  background-color: #80b280;"
+                        "}")
         # 開始按鈕
         self.start_button = QtWidgets.QPushButton("Start")
+        self.start_button.setStyleSheet(button_style)
         self.start_button.clicked.connect(self.start_animation)
         # 停止按鈕
         self.stop_button = QtWidgets.QPushButton("Stop")
+        self.stop_button.setStyleSheet(button_style.replace("#8fc08f", "#d9534f").replace("#80b280", "#c9302c"))
         self.stop_button.clicked.connect(self.stop_animation)
 
         # 建立繪畫動畫的區域
