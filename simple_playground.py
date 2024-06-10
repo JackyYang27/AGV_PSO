@@ -299,7 +299,7 @@ def MLP(car_state, Whid, Wout):
     Wout (numpy array): 隱藏層到輸出層的權重矩陣。
     '''
     front_dist, right_dist, left_dist = car_state
-    # 將車輛狀態數據轉換為NumPy數組，作為神經網路的輸入層
+    # 將車輛狀態數據作為神經網路的輸入層
     input_layer = np.array([[front_dist, right_dist, left_dist]])
     # 計算隱藏層的輸入與輸出
     hidden_input = input_layer @ Whid
@@ -329,18 +329,18 @@ class Particle:
         self.succeeded = False #紀錄是否抵達終點
 
     # 更新權重
-    def update_velocity_and_position(self, previous_best, global_best, phi1=2.0, phi2=2.0):
+    def update_velocity_and_position(self, previous_best, global_best, phi1=2, phi2=1.5):
+        vmax = 10
+        vmin = -vmax
         self.pre_velocity = self.cur_velocity
         # r1, r2 = np.random.rand(), np.random.rand()  原先想寫這行發現效果不彰
-
         #把權重堆疊成一個數組
         all = np.vstack((self.Whid, self.Wout.reshape(1, -1)))
-
         # 計算新的速度，包含自我認知分量和社會認知分量
-        # self.cur_velocity = self.pre_velocity + phi1 * r1 * (previous_best - combined) + phi2 * r2 *(global_best - combined)
-        self.cur_velocity = self.pre_velocity + phi1 * (previous_best - all) + phi2 * (global_best - all)
-        
-        #更新權重
+        # velocity_update = self.pre_velocity + phi1 * r1 * (previous_best - all) + phi2 * r2 *(global_best - all)
+        velocity_update = self.pre_velocity + phi1 * (previous_best - all) + phi2 * (global_best - all)
+        self.cur_velocity = np.clip(self.pre_velocity + velocity_update, vmin, vmax) #速度限制
+        #更新權重(位置)
         self.Whid += self.cur_velocity[:-1]
         self.Wout += self.cur_velocity[-1].reshape(-1, 1)
 
@@ -369,12 +369,12 @@ class Particle:
 
 # PSO
 class PSO:
-    def __init__(self, init_particle_num=40):
+    def __init__(self, particle_num=50):
         self.previous_best_particle_weight = None
         self.previous_best_particle_fitnessVal = float("-inf")
         self.find_success_particle = False
         self.playground = Playground()
-        self.particles = [Particle() for i in range(init_particle_num)]
+        self.particles = [Particle() for i in range(particle_num)]
 
     # 適應度函數
     def calculate_fitness(self, car_traj: list, succeeded: bool):
@@ -385,40 +385,39 @@ class PSO:
         # 路徑長度的懲罰
         length_penalty = 0.4 * len(car_traj)
         # 基本分數
-        base = 200 if succeeded else -50  # 未成功則給予懲罰分
+        base = 200 if succeeded else -50  # 未成功則給予懲罰
         # 總分
         total_score = base + final_position_score - length_penalty
         
         return total_score
 
-    def train_model(self):
-        while not self.find_success_particle:
-            # 先求得每台車子的運行結果
+    def train_model(self, max_iteration = 200):
+        iteration_count = 0
+        while not self.find_success_particle and iteration_count < max_iteration:
+            # 讓每一台車子跑一次
             for particle in self.particles:
                 particle.run_in_playground(self.playground)
 
             # 計算歷史最佳和鄰近最佳
             for ind_out, particle in enumerate(self.particles):
-                # 更新歷史最佳
-                if (self.calculate_fitness(particle.get_route(), particle.can_finish()) >self.previous_best_particle_fitnessVal):
-                    self.previous_best_particle_fitnessVal = self.calculate_fitness(particle.get_route(),
-                                                                                particle.can_finish())
+                # 若為歷史最佳則更新
+                if (self.calculate_fitness(particle.get_route(), particle.can_finish()) > self.previous_best_particle_fitnessVal):
+                    self.previous_best_particle_fitnessVal = self.calculate_fitness(particle.get_route(), particle.can_finish())
                     self.previous_best_particle_weight = particle.get_weight()
                     if (particle.can_finish()):
                         self.find_success_particle = True
 
-                # 更新鄰居最佳
+                # 更新鄰近最佳
                 global_best_particle_weight = particle.get_weight()
                 global_best_particle_fitnessVal = self.calculate_fitness(particle.get_route(), particle.can_finish())
                 for ind_in, neighbor in enumerate(self.particles):
                     # 若找到鄰近最佳
-                    if (self.calculate_fitness(neighbor.get_route(), neighbor.can_finish()) >
-                            global_best_particle_fitnessVal):
+                    if (self.calculate_fitness(neighbor.get_route(), neighbor.can_finish()) > global_best_particle_fitnessVal):
                         global_best_particle_weight = neighbor.get_weight()
-                        global_best_particle_fitnessVal = self.calculate_fitness(neighbor.get_route(),
-                                                                               neighbor.can_finish())
+                        global_best_particle_fitnessVal = self.calculate_fitness(neighbor.get_route(), neighbor.can_finish())
                 # 更新粒子的速度和位置
                 particle.update_velocity_and_position(self.previous_best_particle_weight, global_best_particle_weight)
+            iteration_count += 1
 
     # 取得最佳的粒子
     def get_weight(self):
@@ -588,7 +587,6 @@ class Animation(QtWidgets.QMainWindow):
     # 實際顯示整個動畫
     def run(self):
         self.show()
-
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
